@@ -1,0 +1,2 @@
+# jsClientSub
+Nodejs PubSubHubbub subscriber
