@@ -5,7 +5,7 @@ var https = require('https');
 var url = require('url');
 var adehun = require('Adehun');
 
-hRequest.post = function(href, params){
+hRequest.post = function(href, params, headers){
 	var params = querystring.stringify(params);
 	var rString = '';
 	var opt = url.parse(href);
@@ -19,7 +19,12 @@ hRequest.post = function(href, params){
 	opt.headers = {
 		'Content-Type' : 'application/x-www-form-urlencoded',
 		'Content-Length' : params.length,
-		'User-Agent' : 'MinusFour'
+	}
+
+	if(headers !== undefined){
+		for(header in headers){
+			opt.headers[header] = headers[header];
+		}
 	}
 
 	var dProm = adehun.deferred();

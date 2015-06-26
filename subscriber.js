@@ -4,48 +4,67 @@ var hRequest = require('./hRequest');
 var querystring = require('querystring');
 var subscriptions = require('./subscriptions');
 
-ClientSub.prototype.subscribe = function(cbPath, subName, hub, topic){
-	if(!this._subscriptions.subExists(subName)){
-		var sub = this._subscriptions.add(cbPath, subName, hub, topic);
-		var that = this;
-		hRequest.post(hub, {
-			'hub.verify' : 'sync',
-			'hub.mode' : 'subscribe',
-			'hub.topic' : topic,
-			'hub.callback' : 'http://' + this._host + cbPath
-		}).then(function(data){
-			console.log(data);
-			if(data.code === 204 || data.code === 202){
-				trigger.call(that, 'subscribeSuccess');
-				sub.markSubscribed();
-			} else {
-				console.log('[Unexpected answer]');
-				console.log(data);
-			}
-		});
+ClientSub.prototype.subscribe = function(subOptions, clientOptions, acceptHeaders){
+	if(subOptions.name !== undefined && !this._subscriptions.subExists(subOptions.name)){
+		if(subOptions.path !== undefined && subOptions.hub !== undefined && subOptions.topic !== undefined){
+			acceptHeaders = acceptHeaders !== undefined ? acceptHeaders : { };
+			clientOptions = clientOptions !== undefined ? clientOptions : { };
+			var sub = this._subscriptions.add(subOptions, clientOptions, acceptHeaders);
+			handleRequest.call(this, sub, 'subscribe');
+		}
 	}
 }
 
 ClientSub.prototype.unsubscribe = function(subName){
 	if(this._subscriptions.subExists(subName)){
 		var sub = this._subscriptions.getSubByName(subName);
-		var that = this;
-		sub.markUnsubscribing();
-		hRequest.post(sub._hub, {
-			'hub.verify' : 'sync',
-			'hub.mode' : 'unsubscribe',
-			'hub.topic' : sub._topic,
-			'hub.callback' : 'http://' + this._host + sub._path
-		}).then(function(data){
-			console.log(data.code);
-			if(data.code === 204 || data.code === 202){
-				sub.markUnsubscribed();
-			} else {
-				console.log('[Unexpected answer]');
-				console.log(data);
-			}
-		});
+		handleRequest.call(this, sub, 'unsubscribe');
 	}
+}
+
+function handleRequest(sub, mode){
+	var subOptions = sub.subOptions;
+	var clientOptions = sub.clientOptions;
+	var postData = {
+		'hub.verify' : 'sync',
+		'hub.topic' : subOptions.topic,
+		'hub.callback' : 'http://' + this._host + subOptions.path
+	}
+
+	postData['hub.mode'] = mode;
+
+	if(mode == 'unsubscribing'){
+		sub.markUnsubscribing();
+	}
+
+	if(subOptions.secret !== undefined){
+		postData['hub.secret'] = subOptions.secret;
+	}
+	if(clientOptions.extraData !== undefined && typeof clientOptions.extraData === 'object'){
+		for(param in clientOptions.extraData){
+			postData[param] = clientOptions.extraData[param];
+		}
+	}
+	var httpRequest;
+	if(clientOptions.extraHeaders !== undefined && typeof clientOptions.extraHeaders === 'object') {
+		httpRequest = hRequest.post(subOptions.hub, postData, clientOptions.extraHeaders);
+	} else {
+		httpRequest = hRequest.post(subOptions.hub, postData);
+	}
+
+	httpRequest.then(function(data){
+		if(data.code === 204 || data.code === 202){
+			if(mode == 'subscribe'){
+				sub.markSubscribed();
+			} else {
+				sub.markUnsubscribed();
+			}
+		} else {
+			console.log('[Unexpected answer]');
+			console.log(data);
+		}
+	});
+
 }
 
 function trigger(event){
@@ -82,26 +101,30 @@ function ClientSub(host, dir, httpServer){
 		req.on('end', function(){
 			var subscription = that._subscriptions.getSubByPath(params.pathname);
 			if(subscription){
-				if(subscription.isValidating() && Object.keys(params.query).length > 0){
+				if((subscription.isValidating() || subscription.isUnsubscribing()) && Object.keys(params.query).length > 0){
 						res.write(params.query['hub.challenge']);
-					} else if(req.headers['X-Hub-Signature'] === undefined || subscription.auth(req.headers['X-Hub-Signature'])) {
-						res.writeHead(200, { 'Accept' : 'application/json' });
-						if(req.headers['content-type']){
-							if(req.headers['content-type'] == 'application/json'){
-								try {
-									var msgObj = JSON.parse(msg);
-									trigger.call(that, 'update', subscription._name, 'json', msgObj);
-								} catch (e){
-									console.log('Malformed JSON data');
-								}
-							} else if(req.headers['content-type'] == 'application/x-www-form-urlencoded'){
-								try {
-									var msgObj = querystring.parse(msg);
-									trigger.call(that, 'update', subscription._name, 'post', msgObj);
-								}catch(e){
-									console.log('Malformed POST data');
+					} else {
+						res.writeHead(200, subscription.acceptHeaders);
+						if(req.headers['X-Hub-Signature'] === undefined || subscription.auth(req.headers['X-Hub-Signature'])) {
+							if(req.headers['content-type']){
+								if(req.headers['content-type'] == 'application/json'){
+									try {
+										var msgObj = JSON.parse(msg);
+										trigger.call(that, 'update', subscription, 'json', msgObj, req.headers);
+									} catch (e){
+										console.log('Malformed JSON data');
+									}
+								} else if(req.headers['content-type'] == 'application/x-www-form-urlencoded'){
+									try {
+										var msgObj = querystring.parse(msg);
+										trigger.call(that, 'update', subscription, 'post', msgObj, req.headers);
+									}catch(e){
+										console.log('Malformed POST data');
+									}
 								}
 							}
+						} else {
+							console.log('Auth Failed');
 						}
 					}
 			} else {

@@ -20,16 +20,15 @@ function Subscriptions(source){
 	}
 }
 
-Subscriptions.prototype.add = function(cbPath, subName, hub, topic, secret){
+Subscriptions.prototype.add = function(subOptions, clientOptions, acceptHeaders){
 	var sub = new Subscription({
 		'_source' : this._source,
-		'_name' : subName,
-		'_path' : cbPath,
-		'_hub' : hub,
-		'_topic' : topic,
-		'_state' : state.validating
+		'_state' : state.validating,
+		'subOptions' : subOptions,
+		'clientOptions' : clientOptions,
+		'acceptHeaders' : acceptHeaders
 	});
-	this._subscriptions[subName] = sub;
+	this._subscriptions[subOptions.name] = sub;
 	save.call(sub);
 	return sub;
 }
@@ -48,7 +47,7 @@ Subscriptions.prototype.getSubByName = function(subName){
 
 Subscriptions.prototype.getSubByPath = function(cbPath){
 	for(sub in this._subscriptions){
-		if(this._subscriptions[sub]._path === cbPath)
+		if(this._subscriptions[sub].subOptions.path === cbPath)
 			return this._subscriptions[sub];
 	}
 }
@@ -75,41 +74,41 @@ Subscription.prototype.isUnsubscribing = function(){
 }
 
 Subscription.prototype.auth = function(challenge){
-	if(this._secret){
+	if(this.subOptions.secret){
 		var mac = crypto.createHmac('sha1', challenge);
 		mac.update(challenge);
-		if(this._secret === mac.digest('hex')){
+		if(this.subOptions.secret === mac.digest('hex')){
 			return true;
-		} 
+		}
 	}
-	returun false;	
+	return false;
 }
 
 Subscription.prototype.markSubscribed = function(){
-	console.log('[Subscription] Now changed to subscribed.');
+	console.log('[' + this.subOptions.name + '] Now changed to subscribed.');
 	this._state = state.subscribed;
 	save.call(this);
 }
 
 Subscription.prototype.markUnsubscribing = function(){
-	console.log('[Subscription] Now changed to unsubscribing.');
+	console.log('[' + this.subOptions.name + '] Now changed to unsubscribing.');
 	this._state = state.unsubscribing;
 	save.call(this);
 }
 
 Subscription.prototype.markUnsubscribed = function(){
-	console.log('[Subscription] Now changed to unsubscribed.');
+	console.log('[' + this.subOptions.name + '] Now changed to unsubscribed.');
 	this._state = state.unsubscribed;
 	save.call(this);
 }
 
 function save(){
 	var that = this;
-	fs.writeFile(this._source + '/' + this._name, JSON.stringify(this), function(err){
+	fs.writeFile(this._source + '/' + this.subOptions.name, JSON.stringify(this), function(err){
 		if(err)
 			console.log('[Error] ' + err);
 		else
-			console.log('[Success] Subscription file: ' + that._name + ' was saved.');
+			console.log('[Success] Subscription file: ' + that.subOptions.name + ' was saved.');
 	});
 }
 
